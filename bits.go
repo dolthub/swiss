@@ -4,7 +4,6 @@ import (
 	"math/bits"
 
 	"github.com/dolthub/maphash"
-
 	"github.com/dolthub/swiss/simd"
 )
 

@@ -3,9 +3,17 @@
 
 package main
 
+import (
+	. "github.com/mmcloughlin/avo/build"
+	. "github.com/mmcloughlin/avo/operand"
+)
+
 func main() {
+	ConstraintExpr("amd64")
+
 	TEXT("MatchMetadata", NOSPLIT, "func(metadata *[16]int8, hash int8) uint16")
-	Doc("MatchMetadata matches |hash| against each byte in |metadata|.")
+	Doc("MatchMetadata performs a 16-way probe of |metadata| using SSE instructions",
+		"nb: |metadata| must be an aligned pointer")
 	m := Mem{Base: Load(Param("metadata"), GP64())}
 	h := Load(Param("hash"), GP64())
 

@@ -20,20 +20,29 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-//go:generate go run asm.go -out match.s -stubs stub.go
+//go:generate go run asm.go -out match.s -stubs match_amd64.go
 
 func TestMatchMetadata(t *testing.T) {
 	meta := [16]int8{
 		0, 1, 2, 3, 4, 5, 6, 7,
 		8, 9, 10, 11, 12, 13, 14, 15,
 	}
-
-	for _, candidate := range meta {
-		expected := uint16(1) << candidate
-		mask := MatchMetadata(&meta, candidate)
-		assert.NotZero(t, mask)
-		assert.Equal(t, expected, mask)
-	}
+	t.Run("simd match", func(t *testing.T) {
+		for _, candidate := range meta {
+			expected := uint16(1) << candidate
+			mask := MatchMetadata(&meta, candidate)
+			assert.NotZero(t, mask)
+			assert.Equal(t, expected, mask)
+		}
+	})
+	t.Run("fallback match", func(t *testing.T) {
+		for _, candidate := range meta {
+			expected := uint16(1) << candidate
+			mask := matchMetadata(&meta, candidate)
+			assert.NotZero(t, mask)
+			assert.Equal(t, expected, mask)
+		}
+	})
 }
 
 func BenchmarkMatchMetadata(b *testing.B) {
@@ -41,9 +50,23 @@ func BenchmarkMatchMetadata(b *testing.B) {
 		0, 1, 2, 3, 4, 5, 6, 7,
 		8, 9, 10, 11, 12, 13, 14, 15,
 	}
-	var mask uint16
-	for i := 0; i < b.N; i++ {
-		mask = MatchMetadata(&meta, int8(i))
-	}
-	b.Log(mask)
+	b.Run("simd match", func(b *testing.B) {
+		var mask uint16
+		for i := 0; i < b.N; i++ {
+			mask = MatchMetadata(&meta, int8(i))
+		}
+		b.Log(mask)
+	})
+	b.Run("generic match", func(b *testing.B) {
+		var mask uint16
+		for i := 0; i < b.N; i++ {
+			mask = matchMetadata(&meta, int8(i))
+		}
+		b.Log(mask)
+	})
+}
+
+func TestCastBool(t *testing.T) {
+	assert.Equal(t, int8(0), castBool(false))
+	assert.Equal(t, int8(1), castBool(true))
 }
