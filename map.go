@@ -3,13 +3,15 @@ package swiss
 import (
 	"math"
 	"math/bits"
+	"math/rand"
 
 	"github.com/dolthub/maphash"
 )
 
 const (
-	width      = 16
-	loadFactor = 14.0 / 16.0
+	groupSize       = 16
+	maxAvgGroupLoad = 14
+	maxLoadFactor   = float32(maxAvgGroupLoad) / float32(groupSize)
 )
 
 // Map is an open-addressing hash map
@@ -25,8 +27,8 @@ type Map[K comparable, V any] struct {
 
 // group is a group of 16 key-value pairs
 type group[K comparable, V any] struct {
-	keys   [width]K
-	values [width]V
+	keys   [groupSize]K
+	values [groupSize]V
 }
 
 // NewMap constructs a Map.
@@ -36,7 +38,7 @@ func NewMap[K comparable, V any](sz uint32) (m *Map[K, V]) {
 		ctrl:   make([]metadata, groups),
 		groups: make([]group[K, V], groups),
 		hash:   maphash.NewHasher[K](),
-		limit:  groups * 14,
+		limit:  groups * maxAvgGroupLoad,
 	}
 	for i := range m.ctrl {
 		m.ctrl[i] = newEmptyMetadata()
@@ -46,7 +48,6 @@ func NewMap[K comparable, V any](sz uint32) (m *Map[K, V]) {
 
 // Has returns true if |key| is present in |m|.
 func (m *Map[K, V]) Has(key K) (ok bool) {
-
 	hi, lo := hashKey(m.hash, key)
 	_, _, ok = m.find(key, hi, lo)
 	return
@@ -107,6 +108,34 @@ func (m *Map[K, V]) Delete(key K) bool {
 	return true
 }
 
+// Iter iterates the elements of the Map, passing them to the callback.
+// It guarantees that any key in the Map will be visited only once, and
+// for un-mutated Maps, every key will be visited once. If the Map is
+// Mutated during iteration, mutations will be reflected on return from
+// Iter, but the set of keys visited by Iter is non-deterministic.
+func (m *Map[K, V]) Iter(cb func(k K, v V) (stop bool)) {
+	// take a consistent view of the table in case
+	// we rehash during iteration
+	ctrl, groups := m.ctrl, m.groups
+	// pick a random starting group
+	g := rand.Intn(len(groups))
+	for n := 0; n < len(groups); n++ {
+		for s, c := range ctrl[g] {
+			if c == empty || c == tombstone {
+				continue
+			}
+			k, v := groups[g].keys[s], groups[g].values[s]
+			if stop := cb(k, v); stop {
+				return
+			}
+		}
+		g++
+		if g >= len(groups) {
+			g = 0
+		}
+	}
+}
+
 // Count returns the number of elements in the Map.
 func (m *Map[K, V]) Count() int {
 	return int(m.resident - m.dead)
@@ -154,7 +183,7 @@ func (m *Map[K, V]) rehash(n uint32) {
 		m.ctrl[i] = newEmptyMetadata()
 	}
 	m.hash = maphash.NewHasher[K]()
-	m.limit = n * 14
+	m.limit = n * groupSize
 	m.resident, m.dead = 0, 0
 	for g := range ctrl {
 		for s := range ctrl[g] {
@@ -168,7 +197,7 @@ func (m *Map[K, V]) rehash(n uint32) {
 }
 
 func (m *Map[K, V]) loadFactor() float32 {
-	slots := float32(len(m.groups) * width)
+	slots := float32(len(m.groups) * groupSize)
 	return float32(m.resident-m.dead) / slots
 }
 
@@ -180,7 +209,7 @@ func probeStart(hi h1, groups int) uint32 {
 // numGroups returns the minimum number of groups needed to store |n|
 // elements, accounting for load factor and power of 2 alignment
 func numGroups(n uint32) (groups uint32) {
-	groups = uint32(math.Ceil(float64(n) / 14.0))
+	groups = uint32(math.Ceil(float64(n) / float64(maxAvgGroupLoad)))
 	if groups == 0 {
 		groups = 1
 	}

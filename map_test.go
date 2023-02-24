@@ -24,9 +24,23 @@ func TestSwissMap(t *testing.T) {
 	t.Run("strings=100_000", func(t *testing.T) {
 		testSwissMap(t, genStringData(16, 100_000))
 	})
+	t.Run("uint32=100", func(t *testing.T) {
+		testSwissMap(t, genUint32Data(100))
+	})
+	t.Run("uint32=1000", func(t *testing.T) {
+		testSwissMap(t, genUint32Data(1000))
+	})
+	t.Run("uint32=10_000", func(t *testing.T) {
+		testSwissMap(t, genUint32Data(10_000))
+	})
+	t.Run("uint32=100_000", func(t *testing.T) {
+		testSwissMap(t, genUint32Data(100_000))
+	})
 }
 
 func testSwissMap[K comparable](t *testing.T, keys []K) {
+	// sanity check
+	require.Equal(t, len(keys), len(uniq(keys)), keys)
 	t.Run("put", func(t *testing.T) {
 		testMapPut(t, keys)
 	})
@@ -39,12 +53,27 @@ func testSwissMap[K comparable](t *testing.T, keys []K) {
 	t.Run("delete", func(t *testing.T) {
 		testMapDelete(t, keys)
 	})
+	t.Run("iter", func(t *testing.T) {
+		testMapIter(t, keys)
+	})
 	t.Run("grow", func(t *testing.T) {
 		testMapGrow(t, keys)
 	})
 	t.Run("probe stats", func(t *testing.T) {
 		testProbeStats(t, keys)
 	})
+}
+
+func uniq[K comparable](keys []K) []K {
+	s := make(map[K]struct{}, len(keys))
+	for _, k := range keys {
+		s[k] = struct{}{}
+	}
+	u := make([]K, 0, len(keys))
+	for k := range s {
+		u = append(u, k)
+	}
+	return u
 }
 
 func genStringData(size, count int) (keys []string) {
@@ -58,6 +87,16 @@ func genStringData(size, count int) (keys []string) {
 	for i := range keys {
 		keys[i] = string(r[:size])
 		r = r[size:]
+	}
+	return
+}
+
+func genUint32Data(count int) (keys []uint32) {
+	keys = make([]uint32, count)
+	var x uint32
+	for i := range keys {
+		x += (rand.Uint32() % 128) + 1
+		keys[i] = x
 	}
 	return
 }
@@ -120,6 +159,34 @@ func testMapDelete[K comparable](t *testing.T, keys []K) {
 	assert.Equal(t, 0, m.Count())
 }
 
+func testMapIter[K comparable](t *testing.T, keys []K) {
+	m := NewMap[K, int](uint32(len(keys)))
+	for i, key := range keys {
+		m.Put(key, i)
+	}
+	visited := make(map[K]uint, len(keys))
+	for _, k := range keys {
+		visited[k] = 0
+	}
+	m.Iter(func(k K, v int) (stop bool) {
+		visited[k]++
+		return
+	})
+	for _, c := range visited {
+		assert.Equal(t, c, uint(1))
+	}
+	// mutate on iter
+	m.Iter(func(k K, v int) (stop bool) {
+		m.Put(k, -v)
+		return
+	})
+	for i, key := range keys {
+		act, ok := m.Get(key)
+		assert.True(t, ok)
+		assert.Equal(t, -i, act)
+	}
+}
+
 func testMapGrow[K comparable](t *testing.T, keys []K) {
 	n := uint32(len(keys))
 	m := NewMap[K, int](n / 10)
@@ -151,21 +218,20 @@ func testProbeStats[K comparable](t *testing.T, keys []K) {
 	t.Run("load_factor=0.75", func(t *testing.T) {
 		runTest(0.75)
 	})
-	t.Run("load_factor=0.875", func(t *testing.T) {
-		runTest(0.875)
+	t.Run("load_factor=max", func(t *testing.T) {
+		runTest(maxLoadFactor)
 	})
 }
 
 // calculates the sample size and map size necessary to
 // create a load factor of |load| given |n| data points
 func loadFactorSample(n uint32, targetLoad float32) (mapSz, sampleSz uint32) {
-	if targetLoad > loadFactor {
-		targetLoad = loadFactor
+	if targetLoad > maxLoadFactor {
+		targetLoad = maxLoadFactor
 	}
 	// tables are assumed to be power of two
-	n = uint32(math.Exp2(math.Floor(math.Log2(float64(n)))))
 	sampleSz = uint32(float32(n) * targetLoad)
-	mapSz = uint32(float32(n) * loadFactor)
+	mapSz = uint32(float32(n) * maxLoadFactor)
 	return
 }
 
