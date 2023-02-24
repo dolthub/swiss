@@ -15,17 +15,16 @@ func main() {
 	Doc("MatchMetadata performs a 16-way probe of |metadata| using SSE instructions",
 		"nb: |metadata| must be an aligned pointer")
 	m := Mem{Base: Load(Param("metadata"), GP64())}
-	h := Load(Param("hash"), GP64())
-
-	meta := XMM()
-	MOVUPS(m, meta)
-	matches := XMM()
-	MOVDQ2Q(h, matches)
-
+	h := Load(Param("hash"), GP32())
 	mask := GP32()
-	VPBROADCASTB(matches, matches)
-	PCMPEQB(meta, matches)
-	PMOVMSKB(matches, mask)
+
+	x0, x1, x2 := XMM(), XMM(), XMM()
+	MOVD(h, x0)
+	PXOR(x1, x1)
+	PSHUFB(x1, x0)
+	MOVOU(m, x2)
+	PCMPEQB(x2, x0)
+	PMOVMSKB(x0, mask)
 
 	Store(mask.As16(), ReturnIndex(0))
 	RET()
