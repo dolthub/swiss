@@ -1,0 +1,53 @@
+name: Test
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.18.x, 1.19.x, 1.20.x]
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout code
+      uses: actions/checkout@v3
+    - name: Test All
+      run: go test -race ./...
+  fuzz:
+    strategy:
+      matrix:
+        go-version: [1.18.x, 1.19.x, 1.20.x]
+        platform: [ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout code
+      uses: actions/checkout@v3
+    - name: Fuzz Test All
+      working-directory: .
+      run: |
+        files=$(grep -r --include='**_test.go' --files-with-matches 'func Fuzz' .)
+        for file in ${files}
+        do
+            funcs=$(grep -oP 'func \K(Fuzz\w*)' $file)
+            for func in ${funcs}
+            do
+                echo "Fuzzing $func in $file"
+                parentDir=$(dirname $file)
+                go test $parentDir -run=$func -fuzz=$func -fuzztime=5s
+            done
+        done
