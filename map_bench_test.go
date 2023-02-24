@@ -1,110 +1,138 @@
 package swiss
 
 import (
-	"fmt"
+	"math/bits"
 	"math/rand"
+	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/thepudds/swisstable"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func NewStringMap(sz uint32) *Map[string, string] {
-	return NewMap[string, string](sz)
-}
-
-func BenchmarkMaps(b *testing.B) {
-	sizes := []int{8, 64}
-	counts := []int{10, 100, 1000, 10_000}
-	for _, s := range sizes {
-		for _, c := range counts {
-			benchmarkSwissAndBuiltin(b, s, c)
-		}
-	}
-}
-
-func BenchmarkLargeMap(b *testing.B) {
-	benchmarkSwissAndBuiltin(b, 16, 100_000)
-}
-
-func benchmarkSwissAndBuiltin(b *testing.B, keySz, count int) {
-	keys := genStringData(keySz, count)
-	nm := fmt.Sprintf("benchmark swiss map (count=%d,keysize=%d)", count, keySz)
-	b.Run(nm, func(b *testing.B) {
-		m := NewStringMap(uint32(count))
-		for _, k := range keys {
-			m.Put(k, k)
-		}
-		b.ResetTimer()
-		var v string
-		var ok bool
-		for i := 0; i < b.N; i++ {
-			v, ok = m.Get(keys[i%count])
-		}
-		assert.NotNil(b, v)
-		assert.True(b, ok)
-		b.ReportAllocs()
-	})
-	nm = fmt.Sprintf("benchmark go map (count=%d,keysize=%d", count, keySz)
-	b.Run(nm, func(b *testing.B) {
-		m := make(map[string]string, count)
-		for _, k := range keys {
-			m[k] = k
-		}
-		b.ResetTimer()
-		var v string
-		var ok bool
-		for i := 0; i < b.N; i++ {
-			v, ok = m[keys[i%count]]
-		}
-		assert.NotNil(b, v)
-		assert.True(b, ok)
-		b.ReportAllocs()
-	})
-}
-
-func BenchmarkMaps2(b *testing.B) {
-	getInt64Data := func(c int) (data []int64) {
-		data = make([]int64, c)
-		for i := range data {
-			data[i] = rand.Int63()
-		}
-		return
-	}
-
-	counts := []int{10, 100, 1000, 10_000}
-	for _, c := range counts {
-		keys := getInt64Data(c)
-		nm := fmt.Sprintf("benchmark thepudds map (resident=%d", c)
-		b.Run(nm, func(b *testing.B) {
-			m := swisstable.New(c)
-			for _, k := range keys {
-				m.Set(swisstable.Key(k), swisstable.Value(k))
-			}
-			b.ResetTimer()
-			var v swisstable.Value
-			var ok bool
-			for i := 0; i < b.N; i++ {
-				v, ok = m.Get(swisstable.Key(keys[i%c]))
-			}
-			assert.NotNil(b, v)
-			assert.True(b, ok)
-		})
-		nm = fmt.Sprintf("benchmark go map (resident=%d", c)
-		b.Run(nm, func(b *testing.B) {
-			m := make(map[int64]int64, c)
-			for _, k := range keys {
-				m[k] = k
-			}
-			b.ResetTimer()
-			var v int64
-			var ok bool
-			for i := 0; i < b.N; i++ {
-				v, ok = m[keys[i%c]]
-			}
-			assert.NotNil(b, v)
-			assert.True(b, ok)
+func BenchmarkStringMaps(b *testing.B) {
+	const keySz = 8
+	sizes := []int{16, 128, 1024, 8192, 131072}
+	for _, n := range sizes {
+		b.Run("n="+strconv.Itoa(n), func(b *testing.B) {
+			b.Run("runtime map", func(b *testing.B) {
+				benchmarkRuntimeMap(b, genStringData(keySz, n))
+			})
+			b.Run("swiss.Map", func(b *testing.B) {
+				benchmarkSwissMap(b, genStringData(keySz, n))
+			})
 		})
 	}
+}
+
+func BenchmarkInt64Maps(b *testing.B) {
+	sizes := []int{16, 128, 1024, 8192, 131072}
+	for _, n := range sizes {
+		b.Run("n="+strconv.Itoa(n), func(b *testing.B) {
+			b.Run("runtime map", func(b *testing.B) {
+				benchmarkRuntimeMap(b, generateInt64Data(n))
+			})
+			b.Run("swiss.Map", func(b *testing.B) {
+				benchmarkSwissMap(b, generateInt64Data(n))
+			})
+			b.Run("swisstable.Map", func(b *testing.B) {
+				benchmarkThepuddsMap(b, generateInt64Data(n))
+			})
+		})
+	}
+}
+
+func BenchmarkMemoryFootprint(b *testing.B) {
+	sizes := []int{
+		100, 200, 300, 400, 500, 600, 700, 800, 900,
+		1000, 1100, 1200, 1300, 1400, 1500, 1600,
+		1700, 1800, 1900, 2000, 2100, 2200,
+	}
+	for _, n := range sizes {
+		b.Run("n="+strconv.Itoa(n), func(b *testing.B) {
+			b.Run("runtime map", func(b *testing.B) {
+				// max load factor 6.5/8
+				var m map[int]int
+				for i := 0; i < b.N; i++ {
+					m = make(map[int]int, n)
+				}
+				require.NotNil(b, m)
+				b.ReportAllocs()
+			})
+			b.Run("swiss.Map", func(b *testing.B) {
+				// max load factor 7/8
+				var m *Map[int, int]
+				for i := 0; i < b.N; i++ {
+					m = NewMap[int, int](uint32(n))
+				}
+				require.NotNil(b, m)
+				b.ReportAllocs()
+			})
+		})
+	}
+}
+
+func benchmarkRuntimeMap[K comparable](b *testing.B, keys []K) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := make(map[K]K, n)
+	for _, k := range keys {
+		m[k] = k
+	}
+	b.ResetTimer()
+	var ok bool
+	for i := 0; i < b.N; i++ {
+		_, ok = m[keys[uint32(i)&mod]]
+	}
+	assert.True(b, ok)
+	b.ReportAllocs()
+}
+
+func benchmarkSwissMap[K comparable](b *testing.B, keys []K) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := NewMap[K, K](n)
+	for _, k := range keys {
+		m.Put(k, k)
+	}
+	b.ResetTimer()
+	var ok bool
+	for i := 0; i < b.N; i++ {
+		_, ok = m.Get(keys[uint32(i)&mod])
+	}
+	assert.True(b, ok)
+	b.ReportAllocs()
+}
+
+func benchmarkThepuddsMap(b *testing.B, keys []int64) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := swisstable.New(len(keys))
+	for _, k := range keys {
+		m.Set(swisstable.Key(k), swisstable.Value(k))
+	}
+	b.ResetTimer()
+	var v swisstable.Value
+	var ok bool
+	for i := 0; i < b.N; i++ {
+		v, ok = m.Get(swisstable.Key(keys[uint32(i)&mod]))
+	}
+	assert.NotNil(b, v)
+	assert.True(b, ok)
+}
+
+func generateInt64Data(n int) (data []int64) {
+	data = make([]int64, n)
+	var x int64
+	for i := range data {
+		x += rand.Int63n(128) + 1
+		data[i] = x
+	}
+	return
 }

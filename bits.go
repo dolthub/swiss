@@ -3,7 +3,6 @@ package swiss
 import (
 	"math/bits"
 
-	"github.com/dolthub/maphash"
 	"github.com/dolthub/swiss/simd"
 )
 
@@ -21,8 +20,7 @@ type h1 uint64
 // h2 is a 7 bit hash suffix
 type h2 int8
 
-func hashKey[K comparable](hash maphash.Hasher[K], k K) (h1, h2) {
-	h := hash.Hash(k)
+func splitHash(h uint64) (h1, h2) {
 	return h1((h & h1Mask) >> 7), h2(h & h2Mask)
 }
 

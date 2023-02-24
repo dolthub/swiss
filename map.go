@@ -48,14 +48,14 @@ func NewMap[K comparable, V any](sz uint32) (m *Map[K, V]) {
 
 // Has returns true if |key| is present in |m|.
 func (m *Map[K, V]) Has(key K) (ok bool) {
-	hi, lo := hashKey(m.hash, key)
+	hi, lo := splitHash(m.hash.Hash(key))
 	_, _, ok = m.find(key, hi, lo)
 	return
 }
 
 // Get returns the |value| mapped by |key| if one exists.
 func (m *Map[K, V]) Get(key K) (value V, ok bool) {
-	hi, lo := hashKey(m.hash, key)
+	hi, lo := splitHash(m.hash.Hash(key))
 	var g, s uint32
 	g, s, ok = m.find(key, hi, lo)
 	if ok {
@@ -69,7 +69,7 @@ func (m *Map[K, V]) Put(key K, value V) {
 	if m.resident >= m.limit {
 		m.rehash(m.nextSize())
 	}
-	hi, lo := hashKey(m.hash, key)
+	hi, lo := splitHash(m.hash.Hash(key))
 	g, s, ok := m.find(key, hi, lo)
 	if !ok {
 		m.resident++
@@ -81,7 +81,7 @@ func (m *Map[K, V]) Put(key K, value V) {
 
 // Delete attempts to remove |key|, returns true successful.
 func (m *Map[K, V]) Delete(key K) bool {
-	hi, lo := hashKey(m.hash, key)
+	hi, lo := splitHash(m.hash.Hash(key))
 	g, s, ok := m.find(key, hi, lo)
 	if !ok {
 		// |key| is absent, delete failed

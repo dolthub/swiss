@@ -259,7 +259,7 @@ func fmtProbeStats(s probeStats) string {
 
 func getProbeLength[K comparable, V any](t *testing.T, m *Map[K, V], key K) (length uint32, ok bool) {
 	var end uint32
-	hi, lo := hashKey(m.hash, key)
+	hi, lo := splitHash(m.hash.Hash(key))
 	start := probeStart(hi, len(m.groups))
 	end, _, ok = m.find(key, hi, lo)
 	if end < start { // wrapped
