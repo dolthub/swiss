@@ -45,34 +45,24 @@ func BenchmarkInt64Maps(b *testing.B) {
 	}
 }
 
-func BenchmarkMemoryFootprint(b *testing.B) {
-	sizes := []int{
-		100, 200, 300, 400, 500, 600, 700, 800, 900,
-		1000, 1100, 1200, 1300, 1400, 1500, 1600,
-		1700, 1800, 1900, 2000, 2100, 2200,
-	}
-	for _, n := range sizes {
-		b.Run("n="+strconv.Itoa(n), func(b *testing.B) {
-			b.Run("runtime map", func(b *testing.B) {
-				// max load factor 6.5/8
-				var m map[int]int
-				for i := 0; i < b.N; i++ {
-					m = make(map[int]int, n)
-				}
-				require.NotNil(b, m)
-				b.ReportAllocs()
-			})
-			b.Run("swiss.Map", func(b *testing.B) {
-				// max load factor 7/8
-				var m *Map[int, int]
-				for i := 0; i < b.N; i++ {
-					m = NewMap[int, int](uint32(n))
-				}
-				require.NotNil(b, m)
-				b.ReportAllocs()
-			})
+func TestMemoryFootprint(t *testing.T) {
+	t.Skip("unskip for memory footprint stats")
+	var samples []float64
+	for n := 10; n <= 10_000; n += 10 {
+		b1 := testing.Benchmark(func(b *testing.B) {
+			// max load factor 7/8
+			m := NewMap[int, int](uint32(n))
+			require.NotNil(b, m)
 		})
+		b2 := testing.Benchmark(func(b *testing.B) {
+			// max load factor 6.5/8
+			m := make(map[int]int, n)
+			require.NotNil(b, m)
+		})
+		x := float64(b1.MemBytes) / float64(b2.MemBytes)
+		samples = append(samples, x)
 	}
+	t.Logf("mean size ratio: %.3f", mean(samples))
 }
 
 func benchmarkRuntimeMap[K comparable](b *testing.B, keys []K) {
@@ -135,4 +125,11 @@ func generateInt64Data(n int) (data []int64) {
 		data[i] = x
 	}
 	return
+}
+
+func mean(samples []float64) (m float64) {
+	for _, s := range samples {
+		m += s
+	}
+	return m / float64(len(samples))
 }

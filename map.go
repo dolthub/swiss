@@ -49,19 +49,57 @@ func NewMap[K comparable, V any](sz uint32) (m *Map[K, V]) {
 // Has returns true if |key| is present in |m|.
 func (m *Map[K, V]) Has(key K) (ok bool) {
 	hi, lo := splitHash(m.hash.Hash(key))
-	_, _, ok = m.find(key, hi, lo)
-	return
+	g := probeStart(hi, len(m.groups))
+	for { // inlined find loop
+		matches := metaMatchH2(&m.ctrl[g], lo)
+		for matches != 0 {
+			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			if key == m.groups[g].keys[s] {
+				ok = true
+				return
+			}
+			matches &= ^(1 << s) // clear bit |s|
+		}
+		// |key| is not in group |g|,
+		// stop probing if we see an empty slot
+		matches = metaMatchEmpty(&m.ctrl[g])
+		if matches != 0 {
+			ok = false
+			return
+		}
+		g += 1 // linear probing
+		if g >= uint32(len(m.groups)) {
+			g = 0
+		}
+	}
 }
 
 // Get returns the |value| mapped by |key| if one exists.
 func (m *Map[K, V]) Get(key K) (value V, ok bool) {
 	hi, lo := splitHash(m.hash.Hash(key))
-	var g, s uint32
-	g, s, ok = m.find(key, hi, lo)
-	if ok {
-		value = m.groups[g].values[s]
+	g := probeStart(hi, len(m.groups))
+	for { // inlined find loop
+		matches := metaMatchH2(&m.ctrl[g], lo)
+		for matches != 0 {
+			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			if key == m.groups[g].keys[s] {
+				value, ok = m.groups[g].values[s], true
+				return
+			}
+			matches &= ^(1 << s) // clear bit |s|
+		}
+		// |key| is not in group |g|,
+		// stop probing if we see an empty slot
+		matches = metaMatchEmpty(&m.ctrl[g])
+		if matches != 0 {
+			ok = false
+			return
+		}
+		g += 1 // linear probing
+		if g >= uint32(len(m.groups)) {
+			g = 0
+		}
 	}
-	return
 }
 
 // Put attempts to insert |key| and |value|
@@ -70,42 +108,76 @@ func (m *Map[K, V]) Put(key K, value V) {
 		m.rehash(m.nextSize())
 	}
 	hi, lo := splitHash(m.hash.Hash(key))
-	g, s, ok := m.find(key, hi, lo)
-	if !ok {
-		m.resident++
+	g := probeStart(hi, len(m.groups))
+	for { // inlined find loop
+		matches := metaMatchH2(&m.ctrl[g], lo)
+		for matches != 0 {
+			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			if key == m.groups[g].keys[s] { // update
+				m.groups[g].keys[s] = key
+				m.groups[g].values[s] = value
+				return
+			}
+			matches &= ^(1 << s) // clear bit |s|
+		}
+		// |key| is not in group |g|,
+		// stop probing if we see an empty slot
+		matches = metaMatchEmpty(&m.ctrl[g])
+		if matches != 0 { // insert
+			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			m.groups[g].keys[s] = key
+			m.groups[g].values[s] = value
+			m.ctrl[g][s] = int8(lo)
+			m.resident++
+			return
+		}
+		g += 1 // linear probing
+		if g >= uint32(len(m.groups)) {
+			g = 0
+		}
 	}
-	m.ctrl[g][s] = int8(lo)
-	m.groups[g].keys[s] = key
-	m.groups[g].values[s] = value
 }
 
 // Delete attempts to remove |key|, returns true successful.
-func (m *Map[K, V]) Delete(key K) bool {
+func (m *Map[K, V]) Delete(key K) (ok bool) {
 	hi, lo := splitHash(m.hash.Hash(key))
-	g, s, ok := m.find(key, hi, lo)
-	if !ok {
-		// |key| is absent, delete failed
-		return false
+	g := probeStart(hi, len(m.groups))
+	for {
+		matches := metaMatchH2(&m.ctrl[g], lo)
+		for matches != 0 {
+			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			if key == m.groups[g].keys[s] {
+				ok = true
+				// optimization: if |m.ctrl[g]| contains any empty
+				// metadata bytes, we can physically delete |key|
+				// rather than placing a tombstone.
+				// The observation is that any probes into group |g|
+				// would already be terminated by the existing empty
+				// slot, and therefore reclaiming slot |s| will not
+				// cause premature termination of probes into |g|.
+				if metaMatchEmpty(&m.ctrl[g]) != 0 {
+					m.ctrl[g][s] = empty
+					m.resident--
+				} else {
+					m.ctrl[g][s] = tombstone
+					m.dead++
+				}
+				return
+			}
+			matches &= ^(1 << s) // clear bit |s|
+		}
+		// |key| is not in group |g|,
+		// stop probing if we see an empty slot
+		matches = metaMatchEmpty(&m.ctrl[g])
+		if matches != 0 { // |key| absent
+			ok = false
+			return
+		}
+		g += 1 // linear probing
+		if g >= uint32(len(m.groups)) {
+			g = 0
+		}
 	}
-	// optimization: if |m.ctrl[g]| contains any empty
-	// metadata bytes, we can physically delete |key|
-	// rather than placing a tombstone.
-	// The observation is that any probes into group |g|
-	// would already be terminated by the existing empty
-	// slot, and therefore reclaiming slot |s| will not
-	// cause premature termination of probes into |g|.
-	if metaMatchEmpty(&m.ctrl[g]) != 0 {
-		m.ctrl[g][s] = empty
-		m.resident--
-	} else {
-		m.ctrl[g][s] = tombstone
-		m.dead++
-	}
-	var zerok K
-	var zerov V
-	m.groups[g].keys[s] = zerok
-	m.groups[g].values[s] = zerov
-	return true
 }
 
 // Iter iterates the elements of the Map, passing them to the callback.
@@ -142,22 +214,23 @@ func (m *Map[K, V]) Count() int {
 }
 
 // find returns the location of |key| if present, or its insertion location if absent.
+// for performance, find is manually inlined into public methods.
 func (m *Map[K, V]) find(key K, hi h1, lo h2) (g, s uint32, ok bool) {
 	g = probeStart(hi, len(m.groups))
 	for {
-		set := metaMatchH2(&m.ctrl[g], lo)
-		for set != 0 {
-			s = uint32(bits.TrailingZeros16(uint16(set)))
+		matches := metaMatchH2(&m.ctrl[g], lo)
+		for matches != 0 {
+			s = uint32(bits.TrailingZeros16(uint16(matches)))
 			if key == m.groups[g].keys[s] {
 				return g, s, true
 			}
-			set &= ^(1 << s) // clear bit |s|
+			matches &= ^(1 << s) // clear bit |s|
 		}
 		// |key| is not in group |g|,
 		// stop probing if we see an empty slot
-		set = metaMatchEmpty(&m.ctrl[g])
-		if set != 0 {
-			s = uint32(bits.TrailingZeros16(uint16(set)))
+		matches = metaMatchEmpty(&m.ctrl[g])
+		if matches != 0 {
+			s = uint32(bits.TrailingZeros16(uint16(matches)))
 			return g, s, false
 		}
 		g += 1 // linear probing
