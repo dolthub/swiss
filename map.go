@@ -1,17 +1,13 @@
 package swiss
 
 import (
-	"math"
-	"math/bits"
 	"math/rand"
 
 	"github.com/dolthub/maphash"
 )
 
 const (
-	groupSize       = 16
-	maxAvgGroupLoad = 14
-	maxLoadFactor   = float32(maxAvgGroupLoad) / float32(groupSize)
+	maxLoadFactor = float32(maxAvgGroupLoad) / float32(groupSize)
 )
 
 // Map is an open-addressing hash map
@@ -25,11 +21,29 @@ type Map[K comparable, V any] struct {
 	limit    uint32
 }
 
+// metadata is the h2 metadata array for a group.
+// find operations first probe the controls bytes
+// to filter candidates before matching keys
+type metadata [groupSize]int8
+
 // group is a group of 16 key-value pairs
 type group[K comparable, V any] struct {
 	keys   [groupSize]K
 	values [groupSize]V
 }
+
+const (
+	h1Mask    uint64 = 0xffff_ffff_ffff_ff80
+	h2Mask    uint64 = 0x0000_0000_0000_007f
+	empty     int8   = -128 // 0b1000_0000
+	tombstone int8   = -2   // 0b1111_1110
+)
+
+// h1 is a 57 bit hash prefix
+type h1 uint64
+
+// h2 is a 7 bit hash suffix
+type h2 int8
 
 // NewMap constructs a Map.
 func NewMap[K comparable, V any](sz uint32) (m *Map[K, V]) {
@@ -53,12 +67,11 @@ func (m *Map[K, V]) Has(key K) (ok bool) {
 	for { // inlined find loop
 		matches := metaMatchH2(&m.ctrl[g], lo)
 		for matches != 0 {
-			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			s := nextMatch(&matches)
 			if key == m.groups[g].keys[s] {
 				ok = true
 				return
 			}
-			matches &= ^(1 << s) // clear bit |s|
 		}
 		// |key| is not in group |g|,
 		// stop probing if we see an empty slot
@@ -81,12 +94,11 @@ func (m *Map[K, V]) Get(key K) (value V, ok bool) {
 	for { // inlined find loop
 		matches := metaMatchH2(&m.ctrl[g], lo)
 		for matches != 0 {
-			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			s := nextMatch(&matches)
 			if key == m.groups[g].keys[s] {
 				value, ok = m.groups[g].values[s], true
 				return
 			}
-			matches &= ^(1 << s) // clear bit |s|
 		}
 		// |key| is not in group |g|,
 		// stop probing if we see an empty slot
@@ -112,19 +124,18 @@ func (m *Map[K, V]) Put(key K, value V) {
 	for { // inlined find loop
 		matches := metaMatchH2(&m.ctrl[g], lo)
 		for matches != 0 {
-			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			s := nextMatch(&matches)
 			if key == m.groups[g].keys[s] { // update
 				m.groups[g].keys[s] = key
 				m.groups[g].values[s] = value
 				return
 			}
-			matches &= ^(1 << s) // clear bit |s|
 		}
 		// |key| is not in group |g|,
 		// stop probing if we see an empty slot
 		matches = metaMatchEmpty(&m.ctrl[g])
 		if matches != 0 { // insert
-			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			s := nextMatch(&matches)
 			m.groups[g].keys[s] = key
 			m.groups[g].values[s] = value
 			m.ctrl[g][s] = int8(lo)
@@ -145,7 +156,7 @@ func (m *Map[K, V]) Delete(key K) (ok bool) {
 	for {
 		matches := metaMatchH2(&m.ctrl[g], lo)
 		for matches != 0 {
-			s := uint32(bits.TrailingZeros16(uint16(matches)))
+			s := nextMatch(&matches)
 			if key == m.groups[g].keys[s] {
 				ok = true
 				// optimization: if |m.ctrl[g]| contains any empty
@@ -164,7 +175,6 @@ func (m *Map[K, V]) Delete(key K) (ok bool) {
 				}
 				return
 			}
-			matches &= ^(1 << s) // clear bit |s|
 		}
 		// |key| is not in group |g|,
 		// stop probing if we see an empty slot
@@ -220,17 +230,16 @@ func (m *Map[K, V]) find(key K, hi h1, lo h2) (g, s uint32, ok bool) {
 	for {
 		matches := metaMatchH2(&m.ctrl[g], lo)
 		for matches != 0 {
-			s = uint32(bits.TrailingZeros16(uint16(matches)))
+			s = nextMatch(&matches)
 			if key == m.groups[g].keys[s] {
 				return g, s, true
 			}
-			matches &= ^(1 << s) // clear bit |s|
 		}
 		// |key| is not in group |g|,
 		// stop probing if we see an empty slot
 		matches = metaMatchEmpty(&m.ctrl[g])
 		if matches != 0 {
-			s = uint32(bits.TrailingZeros16(uint16(matches)))
+			s = nextMatch(&matches)
 			return g, s, false
 		}
 		g += 1 // linear probing
@@ -256,7 +265,7 @@ func (m *Map[K, V]) rehash(n uint32) {
 		m.ctrl[i] = newEmptyMetadata()
 	}
 	m.hash = maphash.NewHasher[K]()
-	m.limit = n * groupSize
+	m.limit = n * maxAvgGroupLoad
 	m.resident, m.dead = 0, 0
 	for g := range ctrl {
 		for s := range ctrl[g] {
@@ -274,17 +283,31 @@ func (m *Map[K, V]) loadFactor() float32 {
 	return float32(m.resident-m.dead) / slots
 }
 
-func probeStart(hi h1, groups int) uint32 {
-	return fastModN(uint32(hi), uint32(groups))
-
-}
-
-// numGroups returns the minimum number of groups needed to store |n|
-// elements, accounting for load factor and power of 2 alignment
+// numGroups returns the minimum number of groups needed to store |n| elems.
 func numGroups(n uint32) (groups uint32) {
-	groups = uint32(math.Ceil(float64(n) / float64(maxAvgGroupLoad)))
+	groups = (n + maxAvgGroupLoad - 1) / maxAvgGroupLoad
 	if groups == 0 {
 		groups = 1
 	}
 	return
+}
+
+func newEmptyMetadata() (meta metadata) {
+	for i := range meta {
+		meta[i] = empty
+	}
+	return
+}
+
+func splitHash(h uint64) (h1, h2) {
+	return h1((h & h1Mask) >> 7), h2(h & h2Mask)
+}
+
+func probeStart(hi h1, groups int) uint32 {
+	return fastModN(uint32(hi), uint32(groups))
+}
+
+// lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+func fastModN(x, n uint32) uint32 {
+	return uint32((uint64(x) * uint64(n)) >> 32)
 }

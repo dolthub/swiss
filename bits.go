@@ -1,60 +1,41 @@
+//go:build !amd64 || nosimd
+
 package swiss
 
 import (
 	"math/bits"
-
-	"github.com/dolthub/swiss/simd"
+	"unsafe"
 )
 
 const (
-	h1Mask uint64 = 0xffff_ffff_ffff_ff80
-	h2Mask uint64 = 0x0000_0000_0000_007f
+	groupSize       = 8
+	maxAvgGroupLoad = 7
 
-	empty     int8 = -128 // 0b1000_0000
-	tombstone int8 = -2   // 0b1111_1110
+	loBits uint64 = 0x0101010101010101
+	hiBits uint64 = 0x8080808080808080
 )
 
-// h1 is a 57 bit hash prefix
-type h1 uint64
-
-// h2 is a 7 bit hash suffix
-type h2 int8
-
-func splitHash(h uint64) (h1, h2) {
-	return h1((h & h1Mask) >> 7), h2(h & h2Mask)
-}
-
-// metadata is the h2 metadata array for a group.
-// find operations first probe the controls bytes
-// to filter candidates before matching keys
-type metadata [16]int8
-
-type bitset uint16
-
-func newEmptyMetadata() metadata {
-	return metadata{
-		empty, empty, empty, empty,
-		empty, empty, empty, empty,
-		empty, empty, empty, empty,
-		empty, empty, empty, empty,
-	}
-}
+type bitset uint64
 
 func metaMatchH2(m *metadata, h h2) bitset {
-	b := simd.MatchMetadata((*[16]int8)(m), int8(h))
-	return bitset(b)
+	// https://graphics.stanford.edu/~seander/bithacks.html##ValueInWord
+	return hasZeroByte(castUint64(m) ^ (loBits * uint64(h)))
 }
 
 func metaMatchEmpty(m *metadata) bitset {
-	b := simd.MatchMetadata((*[16]int8)(m), empty)
-	return bitset(b)
+	return hasZeroByte(castUint64(m) ^ hiBits)
 }
 
-func nextPow2(x uint32) uint32 {
-	return 1 << (32 - bits.LeadingZeros32(x-1))
+func nextMatch(b *bitset) uint32 {
+	s := uint32(bits.TrailingZeros64(uint64(*b)))
+	*b &= ^(1 << s) // clear bit |s|
+	return s >> 3   // div by 8
 }
 
-// lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
-func fastModN(x, n uint32) uint32 {
-	return uint32((uint64(x) * uint64(n)) >> 32)
+func hasZeroByte(x uint64) bitset {
+	return bitset(((x - loBits) & ^(x)) & hiBits)
+}
+
+func castUint64(m *metadata) uint64 {
+	return *(*uint64)((unsafe.Pointer)(m))
 }

@@ -1,12 +1,65 @@
 package swiss
 
 import (
+	"math/bits"
 	"math/rand"
 	"testing"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestMatchMetadata(t *testing.T) {
+	var meta metadata
+	for i := range meta {
+		meta[i] = int8(i)
+	}
+	t.Run("metaMatchH2", func(t *testing.T) {
+		for _, x := range meta {
+			mask := metaMatchH2(&meta, h2(x))
+			assert.NotZero(t, mask)
+			assert.Equal(t, uint32(x), nextMatch(&mask))
+		}
+	})
+	t.Run("metaMatchEmpty", func(t *testing.T) {
+		mask := metaMatchEmpty(&meta)
+		assert.Equal(t, mask, bitset(0))
+		for i := range meta {
+			meta[i] = empty
+			mask = metaMatchEmpty(&meta)
+			assert.NotZero(t, mask)
+			assert.Equal(t, uint32(i), nextMatch(&mask))
+			meta[i] = int8(i)
+		}
+	})
+	t.Run("nextMatch", func(t *testing.T) {
+		// test iterating multiple matches
+		meta = newEmptyMetadata()
+		mask := metaMatchEmpty(&meta)
+		for i := range meta {
+			assert.Equal(t, uint32(i), nextMatch(&mask))
+		}
+		for i := 0; i < len(meta); i += 2 {
+			meta[i] = int8(42)
+		}
+		mask = metaMatchH2(&meta, h2(42))
+		for i := 0; i < len(meta); i += 2 {
+			assert.Equal(t, uint32(i), nextMatch(&mask))
+		}
+	})
+}
+
+func BenchmarkMatchMetadata(b *testing.B) {
+	var meta metadata
+	for i := range meta {
+		meta[i] = int8(i)
+	}
+	var mask bitset
+	for i := 0; i < b.N; i++ {
+		mask = metaMatchH2(&meta, h2(i))
+	}
+	b.Log(mask)
+}
 
 func TestNextPow2(t *testing.T) {
 	assert.Equal(t, 0, int(nextPow2(0)))
@@ -16,6 +69,10 @@ func TestNextPow2(t *testing.T) {
 	assert.Equal(t, 8, int(nextPow2(7)))
 	assert.Equal(t, 8, int(nextPow2(8)))
 	assert.Equal(t, 16, int(nextPow2(9)))
+}
+
+func nextPow2(x uint32) uint32 {
+	return 1 << (32 - bits.LeadingZeros32(x-1))
 }
 
 func TestConstants(t *testing.T) {

@@ -312,13 +312,21 @@ func getProbeStats[K comparable, V any](t *testing.T, m *Map[K, V], keys []K) (s
 }
 
 func TestNumGroups(t *testing.T) {
-	assert.Equal(t, uint32(1), numGroups(0))
-	assert.Equal(t, uint32(1), numGroups(1))
-	// max load factor 14/16
-	assert.Equal(t, uint32(1), numGroups(14))
-	assert.Equal(t, uint32(2), numGroups(15))
-	assert.Equal(t, uint32(2), numGroups(28))
-	assert.Equal(t, uint32(3), numGroups(29))
-	assert.Equal(t, uint32(4), numGroups(56))
-	assert.Equal(t, uint32(5), numGroups(57))
+	assert.Equal(t, expected(0), numGroups(0))
+	assert.Equal(t, expected(1), numGroups(1))
+	// max load factor 0.875
+	assert.Equal(t, expected(14), numGroups(14))
+	assert.Equal(t, expected(15), numGroups(15))
+	assert.Equal(t, expected(28), numGroups(28))
+	assert.Equal(t, expected(29), numGroups(29))
+	assert.Equal(t, expected(56), numGroups(56))
+	assert.Equal(t, expected(57), numGroups(57))
+}
+
+func expected(x int) (groups uint32) {
+	groups = uint32(math.Ceil(float64(x) / float64(maxAvgGroupLoad)))
+	if groups == 0 {
+		groups = 1
+	}
+	return
 }

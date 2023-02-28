@@ -22,13 +22,16 @@ jobs:
         go-version: ${{ matrix.go-version }}
     - name: Checkout code
       uses: actions/checkout@v3
-    - name: Test All
-      run: go test -race ./...
+    - name: Go Unittest (SIMD)
+      run: go test ./...
+    - name: Go Unittest (non-SIMD)
+      run: go test -tags="nosimd" ./...
   fuzz:
     strategy:
       matrix:
         go-version: [1.18.x, 1.19.x, 1.20.x]
         platform: [ubuntu-latest]
+        tags: [ "", "nosimd"]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Install Go
@@ -44,10 +47,11 @@ jobs:
         for file in ${files}
         do
             funcs=$(grep -oP 'func \K(Fuzz\w*)' $file)
+            tag=${{ matrix.tags }}
             for func in ${funcs}
             do
                 echo "Fuzzing $func in $file"
                 parentDir=$(dirname $file)
-                go test $parentDir -run=$func -fuzz=$func -fuzztime=5s
+                go test $parentDir -tags=$tag -run=$func -fuzz=$func -fuzztime=5s
             done
         done

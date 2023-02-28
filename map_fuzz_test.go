@@ -2,22 +2,23 @@ package swiss
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func FuzzStringMap(f *testing.F) {
-	f.Add(uint8(2), 0, 1)
-	f.Add(uint8(8), 0, 1)
+	f.Add(uint8(1), 14, 50)
 	f.Add(uint8(2), 1, 1)
-	f.Add(uint8(8), 1, 1)
 	f.Add(uint8(2), 14, 14)
-	f.Add(uint8(8), 14, 14)
 	f.Add(uint8(2), 14, 15)
-	f.Add(uint8(8), 14, 15)
 	f.Add(uint8(2), 25, 100)
-	f.Add(uint8(8), 25, 100)
 	f.Add(uint8(2), 25, 1000)
+	f.Add(uint8(8), 0, 1)
+	f.Add(uint8(8), 1, 1)
+	f.Add(uint8(8), 14, 14)
+	f.Add(uint8(8), 14, 15)
+	f.Add(uint8(8), 25, 100)
 	f.Add(uint8(8), 25, 1000)
 	f.Fuzz(func(t *testing.T, keySz uint8, init, count int) {
 		// smaller key sizes generate more overwrites
@@ -34,6 +35,9 @@ func fuzzTestStringMap(t *testing.T, keySz, init, count uint32) {
 	if count == 0 {
 		return
 	}
+	// make tests deterministic
+	setConstSeed(m, 1)
+
 	keys := genStringData(int(keySz), int(count))
 	golden := make(map[string]int, init)
 	for i, k := range keys {
@@ -68,4 +72,14 @@ func fuzzTestStringMap(t *testing.T, keySz, init, count uint32) {
 		assert.True(t, ok)
 		assert.Equal(t, exp, act)
 	}
+}
+
+type hasher struct {
+	hash func()
+	seed uintptr
+}
+
+func setConstSeed[K comparable, V any](m *Map[K, V], seed uintptr) {
+	h := (*hasher)((unsafe.Pointer)(&m.hash))
+	h.seed = seed
 }
