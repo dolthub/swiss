@@ -5,7 +5,7 @@ SwissMap is a hash table adapated from the "SwissTable" family of hash tables fr
 
 ## Example
 
-SwissMap exposes the same interface as the built-in `map`. Give it a try using this [Go playground]().
+SwissMap exposes the same interface as the built-in `map`. Give it a try using this [Go playground](https://go.dev/play/p/JPDC5WhYN7g).
 
 ```go
 package main
