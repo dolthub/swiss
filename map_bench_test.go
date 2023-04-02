@@ -22,8 +22,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/thepudds/swisstable"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,9 +49,6 @@ func BenchmarkInt64Maps(b *testing.B) {
 			})
 			b.Run("swiss.Map", func(b *testing.B) {
 				benchmarkSwissMap(b, generateInt64Data(n))
-			})
-			b.Run("swisstable.Map", func(b *testing.B) {
-				benchmarkThepuddsMap(b, generateInt64Data(n))
 			})
 		})
 	}
@@ -111,24 +106,6 @@ func benchmarkSwissMap[K comparable](b *testing.B, keys []K) {
 	}
 	assert.True(b, ok)
 	b.ReportAllocs()
-}
-
-func benchmarkThepuddsMap(b *testing.B, keys []int64) {
-	n := uint32(len(keys))
-	mod := n - 1 // power of 2 fast modulus
-	require.Equal(b, 1, bits.OnesCount32(n))
-	m := swisstable.New(len(keys))
-	for _, k := range keys {
-		m.Set(swisstable.Key(k), swisstable.Value(k))
-	}
-	b.ResetTimer()
-	var v swisstable.Value
-	var ok bool
-	for i := 0; i < b.N; i++ {
-		v, ok = m.Get(swisstable.Key(keys[uint32(i)&mod]))
-	}
-	assert.NotNil(b, v)
-	assert.True(b, ok)
 }
 
 func generateInt64Data(n int) (data []int64) {
