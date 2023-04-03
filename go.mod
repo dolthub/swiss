@@ -5,7 +5,6 @@ go 1.18
 require (
 	github.com/dolthub/maphash v0.0.0-20221220182448-74e1e1ea1577
 	github.com/stretchr/testify v1.8.1
-	github.com/thepudds/swisstable v0.0.0-20221011152303-9c77dc657777
 )
 
 require (
