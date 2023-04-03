@@ -15,8 +15,6 @@
 package swiss
 
 import (
-	"math/rand"
-
 	"github.com/dolthub/maphash"
 )
 
@@ -214,7 +212,7 @@ func (m *Map[K, V]) Iter(cb func(k K, v V) (stop bool)) {
 	// we rehash during iteration
 	ctrl, groups := m.ctrl, m.groups
 	// pick a random starting group
-	g := rand.Intn(len(groups))
+	g := randIntN(len(groups))
 	for n := 0; n < len(groups); n++ {
 		for s, c := range ctrl[g] {
 			if c == empty || c == tombstone {
@@ -226,15 +224,31 @@ func (m *Map[K, V]) Iter(cb func(k K, v V) (stop bool)) {
 			}
 		}
 		g++
-		if g >= len(groups) {
+		if g >= uint32(len(groups)) {
 			g = 0
 		}
 	}
 }
 
+// Clear removes all elements from the Map.
+func (m *Map[K, V]) Clear() {
+	for i, c := range m.ctrl {
+		for j := range c {
+			m.ctrl[i][j] = empty
+		}
+	}
+	m.resident, m.dead = 0, 0
+}
+
 // Count returns the number of elements in the Map.
 func (m *Map[K, V]) Count() int {
 	return int(m.resident - m.dead)
+}
+
+// Capacity returns the number of additional elements
+// the can be added to the Map before resizing.
+func (m *Map[K, V]) Capacity() int {
+	return int(m.limit - m.resident)
 }
 
 // find returns the location of |key| if present, or its insertion location if absent.
@@ -278,7 +292,7 @@ func (m *Map[K, V]) rehash(n uint32) {
 	for i := range m.ctrl {
 		m.ctrl[i] = newEmptyMetadata()
 	}
-	m.hash = maphash.NewHasher[K]()
+	m.hash = maphash.NewSeed(m.hash)
 	m.limit = n * maxAvgGroupLoad
 	m.resident, m.dead = 0, 0
 	for g := range ctrl {
@@ -324,4 +338,9 @@ func probeStart(hi h1, groups int) uint32 {
 // lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
 func fastModN(x, n uint32) uint32 {
 	return uint32((uint64(x) * uint64(n)) >> 32)
+}
+
+// randIntN returns a random number in the interval [0, n).
+func randIntN(n int) uint32 {
+	return fastModN(fastrand(), uint32(n))
 }

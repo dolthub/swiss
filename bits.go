@@ -53,3 +53,6 @@ func hasZeroByte(x uint64) bitset {
 func castUint64(m *metadata) uint64 {
 	return *(*uint64)((unsafe.Pointer)(m))
 }
+
+//go:linkname fastrand runtime.fastrand
+func fastrand() uint32
