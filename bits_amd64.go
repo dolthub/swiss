@@ -18,6 +18,7 @@ package swiss
 
 import (
 	"math/bits"
+	_ "unsafe"
 
 	"github.com/dolthub/swiss/simd"
 )
@@ -44,3 +45,6 @@ func nextMatch(b *bitset) (s uint32) {
 	*b &= ^(1 << s) // clear bit |s|
 	return
 }
+
+//go:linkname fastrand runtime.fastrand
+func fastrand() uint32
