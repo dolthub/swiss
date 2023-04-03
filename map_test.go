@@ -50,6 +50,14 @@ func TestSwissMap(t *testing.T) {
 	t.Run("uint32=100_000", func(t *testing.T) {
 		testSwissMap(t, genUint32Data(100_000))
 	})
+	t.Run("string capacity", func(t *testing.T) {
+		testSwissMapCapacity(t, func(n int) []string {
+			return genStringData(16, n)
+		})
+	})
+	t.Run("uint32 capacity", func(t *testing.T) {
+		testSwissMapCapacity(t, genUint32Data)
+	})
 }
 
 func testSwissMap[K comparable](t *testing.T, keys []K) {
@@ -66,6 +74,9 @@ func testSwissMap[K comparable](t *testing.T, keys []K) {
 	})
 	t.Run("delete", func(t *testing.T) {
 		testMapDelete(t, keys)
+	})
+	t.Run("clear", func(t *testing.T) {
+		testMapClear(t, keys)
 	})
 	t.Run("iter", func(t *testing.T) {
 		testMapIter(t, keys)
@@ -173,6 +184,29 @@ func testMapDelete[K comparable](t *testing.T, keys []K) {
 	assert.Equal(t, 0, m.Count())
 }
 
+func testMapClear[K comparable](t *testing.T, keys []K) {
+	m := NewMap[K, int](0)
+	assert.Equal(t, 0, m.Count())
+	for i, key := range keys {
+		m.Put(key, i)
+	}
+	assert.Equal(t, len(keys), m.Count())
+	m.Clear()
+	assert.Equal(t, 0, m.Count())
+	for _, key := range keys {
+		ok := m.Has(key)
+		assert.False(t, ok)
+		_, ok = m.Get(key)
+		assert.False(t, ok)
+	}
+	var calls int
+	m.Iter(func(k K, v int) (stop bool) {
+		calls++
+		return
+	})
+	assert.Equal(t, 0, calls)
+}
+
 func testMapIter[K comparable](t *testing.T, keys []K) {
 	m := NewMap[K, int](uint32(len(keys)))
 	for i, key := range keys {
@@ -211,6 +245,32 @@ func testMapGrow[K comparable](t *testing.T, keys []K) {
 		act, ok := m.Get(key)
 		assert.True(t, ok)
 		assert.Equal(t, i, act)
+	}
+}
+
+func testSwissMapCapacity[K comparable](t *testing.T, gen func(n int) []K) {
+	// Capacity() behavior depends on |groupSize|
+	// which varies by processor architecture.
+	caps := []uint32{
+		1 * maxAvgGroupLoad,
+		2 * maxAvgGroupLoad,
+		3 * maxAvgGroupLoad,
+		4 * maxAvgGroupLoad,
+		5 * maxAvgGroupLoad,
+		10 * maxAvgGroupLoad,
+		25 * maxAvgGroupLoad,
+		50 * maxAvgGroupLoad,
+		100 * maxAvgGroupLoad,
+	}
+	for _, c := range caps {
+		m := NewMap[K, K](c)
+		assert.Equal(t, int(c), m.Capacity())
+		keys := gen(rand.Intn(int(c)))
+		for _, k := range keys {
+			m.Put(k, k)
+		}
+		assert.Equal(t, int(c)-len(keys), m.Capacity())
+		assert.Equal(t, int(c), m.Count()+m.Capacity())
 	}
 }
 

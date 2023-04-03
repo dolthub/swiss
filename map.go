@@ -230,9 +230,25 @@ func (m *Map[K, V]) Iter(cb func(k K, v V) (stop bool)) {
 	}
 }
 
+// Clear removes all elements from the Map.
+func (m *Map[K, V]) Clear() {
+	for i, c := range m.ctrl {
+		for j := range c {
+			m.ctrl[i][j] = empty
+		}
+	}
+	m.resident, m.dead = 0, 0
+}
+
 // Count returns the number of elements in the Map.
 func (m *Map[K, V]) Count() int {
 	return int(m.resident - m.dead)
+}
+
+// Capacity returns the number of additional elements
+// the can be added to the Map before resizing.
+func (m *Map[K, V]) Capacity() int {
+	return int(m.limit - m.resident)
 }
 
 // find returns the location of |key| if present, or its insertion location if absent.
