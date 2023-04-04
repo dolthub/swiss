@@ -113,6 +113,24 @@ func TestFastMod(t *testing.T) {
 	})
 }
 
+func BenchmarkFastMod(b *testing.B) {
+	var x uint32
+	mod := uint32(1 << 20)
+	for i := 0; i < b.N; i++ {
+		x = fastModN(uint32(i), mod)
+	}
+	assert.NotNil(b, x)
+}
+
+func BenchmarkMaskMod(b *testing.B) {
+	var x uint32
+	mod := uint32(1 << 20)
+	for i := 0; i < b.N; i++ {
+		x = uint32(i) & (mod - 1)
+	}
+	assert.NotNil(b, x)
+}
+
 func testFastMod(t *testing.T, n uint32) {
 	const trials = 32 * 1024
 	for i := 0; i < trials; i++ {

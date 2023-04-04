@@ -27,28 +27,42 @@ import (
 
 func BenchmarkStringMaps(b *testing.B) {
 	const keySz = 8
-	sizes := []int{16, 128, 1024, 8192, 131072}
-	for _, n := range sizes {
-		b.Run("n="+strconv.Itoa(n), func(b *testing.B) {
-			b.Run("runtime map", func(b *testing.B) {
-				benchmarkRuntimeMap(b, genStringData(keySz, n))
-			})
-			b.Run("swiss.Map", func(b *testing.B) {
-				benchmarkSwissMap(b, genStringData(keySz, n))
-			})
-		})
-	}
+	benchmarkMaps(b, func(n int) []string {
+		return genStringData(keySz, n)
+	})
 }
 
 func BenchmarkInt64Maps(b *testing.B) {
+	benchmarkMaps(b, generateInt64Data)
+}
+
+func benchmarkMaps[K comparable](b *testing.B, genData func(n int) []K) {
 	sizes := []int{16, 128, 1024, 8192, 131072}
 	for _, n := range sizes {
 		b.Run("n="+strconv.Itoa(n), func(b *testing.B) {
-			b.Run("runtime map", func(b *testing.B) {
-				benchmarkRuntimeMap(b, generateInt64Data(n))
+			b.Run("runtime map get present", func(b *testing.B) {
+				benchmarkRuntimeMapGetPresent(b, genData(n))
 			})
-			b.Run("swiss.Map", func(b *testing.B) {
-				benchmarkSwissMap(b, generateInt64Data(n))
+			b.Run("swiss.Map get present", func(b *testing.B) {
+				benchmarkSwissMapGetPresent(b, genData(n))
+			})
+			b.Run("runtime map has present", func(b *testing.B) {
+				benchmarkRuntimeMapHasPresent(b, genData(n))
+			})
+			b.Run("swiss.Map has present", func(b *testing.B) {
+				benchmarkSwissMapHasPresent(b, genData(n))
+			})
+			b.Run("runtime map has absent", func(b *testing.B) {
+				benchmarkRuntimeMapHasAbsent(b, genData(n*2))
+			})
+			b.Run("swiss.Map has absent", func(b *testing.B) {
+				benchmarkSwissMapHasAbsent(b, genData(n*2))
+			})
+			b.Run("runtime map put", func(b *testing.B) {
+				benchmarkRuntimeMapPut(b, genData(n))
+			})
+			b.Run("swiss.Map put", func(b *testing.B) {
+				benchmarkSwissMapPut(b, genData(n))
 			})
 		})
 	}
@@ -57,7 +71,7 @@ func BenchmarkInt64Maps(b *testing.B) {
 func TestMemoryFootprint(t *testing.T) {
 	t.Skip("unskip for memory footprint stats")
 	var samples []float64
-	for n := 10; n <= 10_000; n += 10 {
+	for n := 10; n <= 50_000; n += 10 {
 		b1 := testing.Benchmark(func(b *testing.B) {
 			// max load factor 7/8
 			m := NewMap[int, int](uint32(n))
@@ -68,13 +82,59 @@ func TestMemoryFootprint(t *testing.T) {
 			m := make(map[int]int, n)
 			require.NotNil(b, m)
 		})
-		x := float64(b1.MemBytes) / float64(b2.MemBytes)
+		b3 := testing.Benchmark(func(b *testing.B) {
+			m := make([][2]int, n)
+			require.NotNil(b, m)
+		})
+		s1 := b1.MemBytes
+		s2 := b2.MemBytes
+		s3 := b3.MemBytes
+		x := float64(s1) / float64(s2)
+		t.Logf("%d,%d,%d,%d,%f", n, s1, s2, s3, x)
 		samples = append(samples, x)
 	}
 	t.Logf("mean size ratio: %.3f", mean(samples))
 }
 
-func benchmarkRuntimeMap[K comparable](b *testing.B, keys []K) {
+func benchmarkRuntimeMapGetPresent[K comparable](b *testing.B, keys []K) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := make(map[K]K, n)
+	for _, k := range keys {
+		m[k] = k
+	}
+	b.ResetTimer()
+	var val K
+	var ok bool
+	for i := 0; i < b.N; i++ {
+		val, ok = m[keys[uint32(i)&mod]]
+	}
+	assert.NotNil(b, val)
+	assert.True(b, ok)
+	b.ReportAllocs()
+}
+
+func benchmarkSwissMapGetPresent[K comparable](b *testing.B, keys []K) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := NewMap[K, K](n)
+	for _, k := range keys {
+		m.Put(k, k)
+	}
+	b.ResetTimer()
+	var val K
+	var ok bool
+	for i := 0; i < b.N; i++ {
+		val, ok = m.Get(keys[uint32(i)&mod])
+	}
+	assert.NotNil(b, val)
+	assert.True(b, ok)
+	b.ReportAllocs()
+}
+
+func benchmarkRuntimeMapHasPresent[K comparable](b *testing.B, keys []K) {
 	n := uint32(len(keys))
 	mod := n - 1 // power of 2 fast modulus
 	require.Equal(b, 1, bits.OnesCount32(n))
@@ -91,7 +151,7 @@ func benchmarkRuntimeMap[K comparable](b *testing.B, keys []K) {
 	b.ReportAllocs()
 }
 
-func benchmarkSwissMap[K comparable](b *testing.B, keys []K) {
+func benchmarkSwissMapHasPresent[K comparable](b *testing.B, keys []K) {
 	n := uint32(len(keys))
 	mod := n - 1 // power of 2 fast modulus
 	require.Equal(b, 1, bits.OnesCount32(n))
@@ -102,9 +162,75 @@ func benchmarkSwissMap[K comparable](b *testing.B, keys []K) {
 	b.ResetTimer()
 	var ok bool
 	for i := 0; i < b.N; i++ {
-		_, ok = m.Get(keys[uint32(i)&mod])
+		ok = m.Has(keys[uint32(i)&mod])
 	}
 	assert.True(b, ok)
+	b.ReportAllocs()
+}
+
+func benchmarkRuntimeMapHasAbsent[K comparable](b *testing.B, data []K) {
+	present, absent := data[:len(data)/2], data[len(data)/2:]
+	n := uint32(len(present))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := make(map[K]K, n)
+	for _, k := range present {
+		m[k] = k
+	}
+	b.ResetTimer()
+	var ok bool
+	for i := 0; i < b.N; i++ {
+		_, ok = m[absent[uint32(i)&mod]]
+	}
+	assert.False(b, ok)
+	b.ReportAllocs()
+}
+
+func benchmarkSwissMapHasAbsent[K comparable](b *testing.B, data []K) {
+	present, absent := data[:len(data)/2], data[len(data)/2:]
+	n := uint32(len(present))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := NewMap[K, K](n)
+	for _, k := range present {
+		m.Put(k, k)
+	}
+	b.ResetTimer()
+	var ok bool
+	for i := 0; i < b.N; i++ {
+		ok = m.Has(absent[uint32(i)&mod])
+	}
+	assert.False(b, ok)
+	b.ReportAllocs()
+}
+
+func benchmarkRuntimeMapPut[K comparable](b *testing.B, keys []K) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := make(map[K]int, n)
+	for i, k := range keys {
+		m[k] = -i
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m[keys[uint32(i)&mod]] = i
+	}
+	b.ReportAllocs()
+}
+
+func benchmarkSwissMapPut[K comparable](b *testing.B, keys []K) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	m := NewMap[K, int](n)
+	for i, k := range keys {
+		m.Put(k, -i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.Put(keys[uint32(i)&mod], i)
+	}
 	b.ReportAllocs()
 }
 
