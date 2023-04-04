@@ -54,6 +54,58 @@ func BenchmarkInt64Maps(b *testing.B) {
 	}
 }
 
+func BenchmarkMutateEntry(b *testing.B) {
+	sizes := []int{16, 128, 1024, 8192}
+	for _, n := range sizes {
+		b.Run("n="+strconv.Itoa(n), func(b *testing.B) {
+			b.Run("string map", func(b *testing.B) {
+				const keySz = 8
+				benchmarkMutateEntry(b, genStringData(keySz, n))
+			})
+			b.Run("int64 map", func(b *testing.B) {
+				benchmarkMutateEntry(b, generateInt64Data(n))
+			})
+		})
+	}
+}
+
+// compares two methods of updating an existing entry
+func benchmarkMutateEntry[K comparable](b *testing.B, keys []K) {
+	n := uint32(len(keys))
+	mod := n - 1 // power of 2 fast modulus
+	require.Equal(b, 1, bits.OnesCount32(n))
+	b.Run("Get then Put", func(b *testing.B) {
+		m := NewMap[K, int](n)
+		for i, k := range keys {
+			m.Put(k, i)
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			key := keys[uint32(i)&mod]
+			val, _ := m.Get(key)
+			val++
+			m.Put(key, val)
+		}
+		b.ReportAllocs()
+	})
+	b.Run("MutateEntry", func(b *testing.B) {
+		m := NewMap[K, int](n)
+		for i, k := range keys {
+			m.Put(k, i)
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			key := keys[uint32(i)&mod]
+			m.MutateEntry(key, func(value int, ok bool) (int, bool) {
+				value++
+				return value, ok
+			})
+		}
+		b.ReportAllocs()
+	})
+
+}
+
 func TestMemoryFootprint(t *testing.T) {
 	t.Skip("unskip for memory footprint stats")
 	var samples []float64

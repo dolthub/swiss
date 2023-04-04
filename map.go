@@ -138,7 +138,6 @@ func (m *Map[K, V]) Put(key K, value V) {
 		for matches != 0 {
 			s := nextMatch(&matches)
 			if key == m.groups[g].keys[s] { // update
-				m.groups[g].keys[s] = key
 				m.groups[g].values[s] = value
 				return
 			}
@@ -202,6 +201,68 @@ func (m *Map[K, V]) Delete(key K) (ok bool) {
 	}
 }
 
+// todo: doc comment
+type MutateFn[V any] func(before V, ok bool) (after V, ok2 bool)
+
+// todo: doc comment
+func (m *Map[K, V]) MutateEntry(key K, cb MutateFn[V]) {
+	hi, lo := splitHash(m.hash.Hash(key))
+	g := probeStart(hi, len(m.groups))
+	for { // inlined find loop
+		matches := metaMatchH2(&m.ctrl[g], lo)
+		for matches != 0 {
+			s := nextMatch(&matches)
+			if key == m.groups[g].keys[s] {
+				// |key| present in |m|
+				cur := m.groups[g].values[s]
+				if val, ok := cb(cur, true); ok {
+					// update value to |val|
+					m.groups[g].values[s] = val
+					return
+				} // else: delete |key|
+				// optimization: if |m.ctrl[g]| contains any empty
+				// metadata bytes, we can physically delete |key|
+				// rather than placing a tombstone.
+				// The observation is that any probes into group |g|
+				// would already be terminated by the existing empty
+				// slot, and therefore reclaiming slot |s| will not
+				// cause premature termination of probes into |g|.
+				if metaMatchEmpty(&m.ctrl[g]) != 0 {
+					m.ctrl[g][s] = empty
+					m.resident--
+				} else {
+					m.ctrl[g][s] = tombstone
+					m.dead++
+				}
+				return
+			}
+		}
+		// |key| is not in group |g|,
+		// stop probing if we see an empty slot
+		matches = metaMatchEmpty(&m.ctrl[g])
+		if matches != 0 {
+			// |key| absent from |m|
+			s := nextMatch(&matches)
+			var zero V
+			if val, ok := cb(zero, false); ok {
+				// insert |key| and |val|
+				m.groups[g].keys[s] = key
+				m.groups[g].values[s] = val
+				m.ctrl[g][s] = int8(lo)
+				m.resident++
+				if m.resident > m.limit {
+					m.rehash(m.nextSize())
+				}
+			}
+			return
+		}
+		g += 1 // linear probing
+		if g >= uint32(len(m.groups)) {
+			g = 0
+		}
+	}
+}
+
 // Iter iterates the elements of the Map, passing them to the callback.
 // It guarantees that any key in the Map will be visited only once, and
 // for un-mutated Maps, every key will be visited once. If the Map is
@@ -223,7 +284,7 @@ func (m *Map[K, V]) Iter(cb func(k K, v V) (stop bool)) {
 				return
 			}
 		}
-		g++
+		g += 1 // linear probing
 		if g >= uint32(len(groups)) {
 			g = 0
 		}
@@ -328,7 +389,7 @@ func newEmptyMetadata() (meta metadata) {
 }
 
 func splitHash(h uint64) (h1, h2) {
-	return h1((h & h1Mask) >> 7), h2(h & h2Mask)
+	return h1(h >> 7), h2(h & h2Mask)
 }
 
 func probeStart(hi h1, groups int) uint32 {

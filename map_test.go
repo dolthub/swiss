@@ -75,6 +75,15 @@ func testSwissMap[K comparable](t *testing.T, keys []K) {
 	t.Run("delete", func(t *testing.T) {
 		testMapDelete(t, keys)
 	})
+	t.Run("mutate: insert", func(t *testing.T) {
+		testMapMutateEntryInsert(t, keys)
+	})
+	t.Run("mutate: update", func(t *testing.T) {
+		testMapMutateEntryUpdate(t, keys)
+	})
+	t.Run("mutate: delete", func(t *testing.T) {
+		testMapMutateEntryDelete(t, keys)
+	})
 	t.Run("clear", func(t *testing.T) {
 		testMapClear(t, keys)
 	})
@@ -182,6 +191,18 @@ func testMapDelete[K comparable](t *testing.T, keys []K) {
 		assert.False(t, ok)
 	}
 	assert.Equal(t, 0, m.Count())
+}
+
+func testMapMutateEntryInsert[K comparable](t *testing.T, keys []K) {
+	panic("todo")
+}
+
+func testMapMutateEntryUpdate[K comparable](t *testing.T, keys []K) {
+	panic("todo")
+}
+
+func testMapMutateEntryDelete[K comparable](t *testing.T, keys []K) {
+	panic("todo")
 }
 
 func testMapClear[K comparable](t *testing.T, keys []K) {
