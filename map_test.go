@@ -15,7 +15,6 @@
 package swiss
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -83,9 +82,6 @@ func testSwissMap[K comparable](t *testing.T, keys []K) {
 	})
 	t.Run("grow", func(t *testing.T) {
 		testMapGrow(t, keys)
-	})
-	t.Run("probe stats", func(t *testing.T) {
-		testProbeStats(t, keys)
 	})
 }
 
@@ -272,117 +268,6 @@ func testSwissMapCapacity[K comparable](t *testing.T, gen func(n int) []K) {
 		assert.Equal(t, int(c)-len(keys), m.Capacity())
 		assert.Equal(t, int(c), m.Count()+m.Capacity())
 	}
-}
-
-func testProbeStats[K comparable](t *testing.T, keys []K) {
-	runTest := func(load float32) {
-		n := uint32(len(keys))
-		sz, k := loadFactorSample(n, load)
-		m := NewMap[K, int](sz)
-		for i, key := range keys[:k] {
-			m.Put(key, i)
-		}
-		// todo: assert stat invariants?
-		stats := getProbeStats(t, m, keys)
-		t.Log(fmtProbeStats(stats))
-	}
-	t.Run("load_factor=0.5", func(t *testing.T) {
-		runTest(0.5)
-	})
-	t.Run("load_factor=0.75", func(t *testing.T) {
-		runTest(0.75)
-	})
-	t.Run("load_factor=max", func(t *testing.T) {
-		runTest(maxLoadFactor)
-	})
-}
-
-// calculates the sample size and map size necessary to
-// create a load factor of |load| given |n| data points
-func loadFactorSample(n uint32, targetLoad float32) (mapSz, sampleSz uint32) {
-	if targetLoad > maxLoadFactor {
-		targetLoad = maxLoadFactor
-	}
-	// tables are assumed to be power of two
-	sampleSz = uint32(float32(n) * targetLoad)
-	mapSz = uint32(float32(n) * maxLoadFactor)
-	return
-}
-
-type probeStats struct {
-	groups     uint32
-	loadFactor float32
-	presentCnt uint32
-	presentMin uint32
-	presentMax uint32
-	presentAvg float32
-	absentCnt  uint32
-	absentMin  uint32
-	absentMax  uint32
-	absentAvg  float32
-}
-
-func fmtProbeStats(s probeStats) string {
-	g := fmt.Sprintf("groups=%d load=%f\n", s.groups, s.loadFactor)
-	p := fmt.Sprintf("present(n=%d): min=%d max=%d avg=%f\n",
-		s.presentCnt, s.presentMin, s.presentMax, s.presentAvg)
-	a := fmt.Sprintf("absent(n=%d):  min=%d max=%d avg=%f\n",
-		s.absentCnt, s.absentMin, s.absentMax, s.absentAvg)
-	return g + p + a
-}
-
-func getProbeLength[K comparable, V any](t *testing.T, m *Map[K, V], key K) (length uint32, ok bool) {
-	var end uint32
-	hi, lo := splitHash(m.hash.Hash(key))
-	start := probeStart(hi, len(m.groups))
-	end, _, ok = m.find(key, hi, lo)
-	if end < start { // wrapped
-		end += uint32(len(m.groups))
-	}
-	length = (end - start) + 1
-	require.True(t, length > 0)
-	return
-}
-
-func getProbeStats[K comparable, V any](t *testing.T, m *Map[K, V], keys []K) (stats probeStats) {
-	stats.groups = uint32(len(m.groups))
-	stats.loadFactor = m.loadFactor()
-	var presentSum, absentSum float32
-	stats.presentMin = math.MaxInt32
-	stats.absentMin = math.MaxInt32
-	for _, key := range keys {
-		l, ok := getProbeLength(t, m, key)
-		if ok {
-			stats.presentCnt++
-			presentSum += float32(l)
-			if stats.presentMin > l {
-				stats.presentMin = l
-			}
-			if stats.presentMax < l {
-				stats.presentMax = l
-			}
-		} else {
-			stats.absentCnt++
-			absentSum += float32(l)
-			if stats.absentMin > l {
-				stats.absentMin = l
-			}
-			if stats.absentMax < l {
-				stats.absentMax = l
-			}
-		}
-	}
-	if stats.presentCnt == 0 {
-		stats.presentMin = 0
-	} else {
-		stats.presentAvg = presentSum / float32(stats.presentCnt)
-	}
-	if stats.absentCnt == 0 {
-		stats.absentMin = 0
-	} else {
-		stats.absentAvg = absentSum / float32(stats.absentCnt)
-	}
-	return
 }
 
 func TestNumGroups(t *testing.T) {
