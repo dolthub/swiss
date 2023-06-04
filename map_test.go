@@ -182,6 +182,11 @@ func testMapDelete[K comparable](t *testing.T, keys []K) {
 		assert.False(t, ok)
 	}
 	assert.Equal(t, 0, m.Count())
+	// put keys back after deleting them
+	for i, key := range keys {
+		m.Put(key, i)
+	}
+	assert.Equal(t, len(keys), m.Count())
 }
 
 func testMapClear[K comparable](t *testing.T, keys []K) {
