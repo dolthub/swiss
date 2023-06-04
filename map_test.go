@@ -26,6 +26,9 @@ import (
 )
 
 func TestSwissMap(t *testing.T) {
+	t.Run("strings=0", func(t *testing.T) {
+		testSwissMap(t, genStringData(16, 0))
+	})
 	t.Run("strings=100", func(t *testing.T) {
 		testSwissMap(t, genStringData(16, 100))
 	})
@@ -37,6 +40,9 @@ func TestSwissMap(t *testing.T) {
 	})
 	t.Run("strings=100_000", func(t *testing.T) {
 		testSwissMap(t, genStringData(16, 100_000))
+	})
+	t.Run("uint32=0", func(t *testing.T) {
+		testSwissMap(t, genUint32Data(0))
 	})
 	t.Run("uint32=100", func(t *testing.T) {
 		testSwissMap(t, genUint32Data(100))
@@ -218,6 +224,16 @@ func testMapIter[K comparable](t *testing.T, keys []K) {
 		m.Put(key, i)
 	}
 	visited := make(map[K]uint, len(keys))
+	m.Iter(func(k K, v int) (stop bool) {
+		visited[k] = 0
+		stop = true
+		return
+	})
+	if len(keys) == 0 {
+		assert.Equal(t, len(visited), 0)
+	} else {
+		assert.Equal(t, len(visited), 1)
+	}
 	for _, k := range keys {
 		visited[k] = 0
 	}
