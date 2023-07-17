@@ -25,6 +25,7 @@ const (
 // Map is an open-addressing hash map
 // based on Abseil's flat_hash_map.
 type Map[K comparable, V any] struct {
+	sz       uint32
 	ctrl     []metadata
 	groups   []group[K, V]
 	hash     maphash.Hasher[K]
@@ -237,6 +238,11 @@ func (m *Map[K, V]) Clear() {
 			m.ctrl[i][j] = empty
 		}
 	}
+
+	groups := numGroups(m.sz)
+	m.groups = make([]group[K, V], groups)
+	m.limit = groups * maxAvgGroupLoad
+
 	m.resident, m.dead = 0, 0
 }
 
