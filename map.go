@@ -185,6 +185,10 @@ func (m *Map[K, V]) Delete(key K) (ok bool) {
 					m.ctrl[g][s] = tombstone
 					m.dead++
 				}
+				var k K
+				var v V
+				m.groups[g].keys[s] = k
+				m.groups[g].values[s] = v
 				return
 			}
 		}
@@ -235,6 +239,14 @@ func (m *Map[K, V]) Clear() {
 	for i, c := range m.ctrl {
 		for j := range c {
 			m.ctrl[i][j] = empty
+		}
+	}
+	var k K
+	var v V
+	for _, g := range m.groups {
+		for i := range g.keys {
+			g.keys[i] = k
+			g.values[i] = v
 		}
 	}
 	m.resident, m.dead = 0, 0
