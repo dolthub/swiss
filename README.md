@@ -18,6 +18,11 @@ func main() {
 	m.Put("foo", 1)
 	m.Put("bar", 2)
 
+	m.Iter(func(k string, v int) (stop bool) {
+		println("iter", k, v)
+		return false // continue
+	})
+
 	if x, ok := m.Get("foo"); ok {
 		println(x)
 	}
@@ -36,12 +41,14 @@ func main() {
 		x, _ := m.Get("bar")
 		println(x)
 	}
-}
-```
-```
-1
-2
--1
 
-Program exited.
+	m.Clear()
+
+	// Output:
+	// iter foo 1
+	// iter bar 2
+	// 1
+	// 2
+	// -1
+}
 ```
