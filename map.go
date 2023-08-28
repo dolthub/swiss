@@ -243,7 +243,8 @@ func (m *Map[K, V]) Clear() {
 	}
 	var k K
 	var v V
-	for _, g := range m.groups {
+	for i := range m.groups {
+		g := &m.groups[i]
 		for i := range g.keys {
 			g.keys[i] = k
 			g.values[i] = v

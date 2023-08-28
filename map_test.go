@@ -216,6 +216,15 @@ func testMapClear[K comparable](t *testing.T, keys []K) {
 		return
 	})
 	assert.Equal(t, 0, calls)
+
+	// Assert that the map was actually cleared...
+	var k K
+	for _, g := range m.groups {
+		for i := range g.keys {
+			assert.Equal(t, k, g.keys[i])
+			assert.Equal(t, 0, g.values[i])
+		}
+	}
 }
 
 func testMapIter[K comparable](t *testing.T, keys []K) {
