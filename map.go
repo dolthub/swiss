@@ -138,7 +138,6 @@ func (m *Map[K, V]) Put(key K, value V) {
 		for matches != 0 {
 			s := nextMatch(&matches)
 			if key == m.groups[g].keys[s] { // update
-				m.groups[g].keys[s] = key
 				m.groups[g].values[s] = value
 				return
 			}
