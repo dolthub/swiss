@@ -12,36 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build amd64 && !nosimd
+//go:build !go1.22
 
 package swiss
 
 import (
-	"math/bits"
 	_ "unsafe"
-
-	"github.com/dolthub/swiss/simd"
 )
 
-const (
-	groupSize       = 16
-	maxAvgGroupLoad = 14
-)
+//go:linkname fastrand runtime.fastrand
+func fastrand() uint32
 
-type bitset uint16
-
-func metaMatchH2(m *metadata, h h2) bitset {
-	b := simd.MatchMetadata((*[16]int8)(m), int8(h))
-	return bitset(b)
-}
-
-func metaMatchEmpty(m *metadata) bitset {
-	b := simd.MatchMetadata((*[16]int8)(m), empty)
-	return bitset(b)
-}
-
-func nextMatch(b *bitset) (s uint32) {
-	s = uint32(bits.TrailingZeros16(uint16(*b)))
-	*b &= ^(1 << s) // clear bit |s|
-	return
+// randIntN returns a random number in the interval [0, n).
+func randIntN(n int) uint32 {
+	return fastModN(fastrand(), uint32(n))
 }

@@ -352,8 +352,3 @@ func probeStart(hi h1, groups int) uint32 {
 func fastModN(x, n uint32) uint32 {
 	return uint32((uint64(x) * uint64(n)) >> 32)
 }
-
-// randIntN returns a random number in the interval [0, n).
-func randIntN(n int) uint32 {
-	return fastModN(fastrand(), uint32(n))
-}
