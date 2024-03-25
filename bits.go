@@ -40,8 +40,8 @@ func metaMatchEmpty(m *metadata) bitset {
 	return hasZeroByte(castUint64(m) ^ hiBits)
 }
 
-func nextMatch(b *bitset) uint32 {
-	s := uint32(bits.TrailingZeros64(uint64(*b)))
+func nextMatch[S Size](b *bitset) S {
+	s := S(bits.TrailingZeros64(uint64(*b)))
 	*b &= ^(1 << s) // clear bit |s|
 	return s >> 3   // div by 8
 }

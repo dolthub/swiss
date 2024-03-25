@@ -313,7 +313,7 @@ func testProbeStats[K comparable](t *testing.T, keys []K) {
 			m.Put(key, i)
 		}
 		// todo: assert stat invariants?
-		stats := getProbeStats(t, m, keys)
+		stats := getProbeStats[K, int, uint32](t, m, keys)
 		t.Log(fmtProbeStats(stats))
 	}
 	t.Run("load_factor=0.5", func(t *testing.T) {
@@ -339,20 +339,20 @@ func loadFactorSample(n uint32, targetLoad float32) (mapSz, sampleSz uint32) {
 	return
 }
 
-type probeStats struct {
-	groups     uint32
+type probeStats[S Size] struct {
+	groups     S
 	loadFactor float32
-	presentCnt uint32
-	presentMin uint32
-	presentMax uint32
+	presentCnt S
+	presentMin S
+	presentMax S
 	presentAvg float32
-	absentCnt  uint32
-	absentMin  uint32
-	absentMax  uint32
+	absentCnt  S
+	absentMin  S
+	absentMax  S
 	absentAvg  float32
 }
 
-func fmtProbeStats(s probeStats) string {
+func fmtProbeStats[S Size](s probeStats[S]) string {
 	g := fmt.Sprintf("groups=%d load=%f\n", s.groups, s.loadFactor)
 	p := fmt.Sprintf("present(n=%d): min=%d max=%d avg=%f\n",
 		s.presentCnt, s.presentMin, s.presentMax, s.presentAvg)
@@ -361,21 +361,21 @@ func fmtProbeStats(s probeStats) string {
 	return g + p + a
 }
 
-func getProbeLength[K comparable, V any](t *testing.T, m *Map[K, V], key K) (length uint32, ok bool) {
-	var end uint32
+func getProbeLength[K comparable, V any, S Size](t *testing.T, m *Map[K, V, S], key K) (length S, ok bool) {
+	var end S
 	hi, lo := splitHash(m.hash.Hash(key))
-	start := probeStart(hi, len(m.groups))
+	start := probeStart[S](hi, len(m.groups))
 	end, _, ok = m.find(key, hi, lo)
 	if end < start { // wrapped
-		end += uint32(len(m.groups))
+		end += S(len(m.groups))
 	}
 	length = (end - start) + 1
 	require.True(t, length > 0)
 	return
 }
 
-func getProbeStats[K comparable, V any](t *testing.T, m *Map[K, V], keys []K) (stats probeStats) {
-	stats.groups = uint32(len(m.groups))
+func getProbeStats[K comparable, V any, S Size](t *testing.T, m *Map[K, V, S], keys []K) (stats probeStats[S]) {
+	stats.groups = S(len(m.groups))
 	stats.loadFactor = m.loadFactor()
 	var presentSum, absentSum float32
 	stats.presentMin = math.MaxInt32
@@ -416,19 +416,19 @@ func getProbeStats[K comparable, V any](t *testing.T, m *Map[K, V], keys []K) (s
 }
 
 func TestNumGroups(t *testing.T) {
-	assert.Equal(t, expected(0), numGroups(0))
-	assert.Equal(t, expected(1), numGroups(1))
+	assert.Equal(t, expected[uint32](0), numGroups[uint32](0))
+	assert.Equal(t, expected[uint32](1), numGroups[uint32](1))
 	// max load factor 0.875
-	assert.Equal(t, expected(14), numGroups(14))
-	assert.Equal(t, expected(15), numGroups(15))
-	assert.Equal(t, expected(28), numGroups(28))
-	assert.Equal(t, expected(29), numGroups(29))
-	assert.Equal(t, expected(56), numGroups(56))
-	assert.Equal(t, expected(57), numGroups(57))
+	assert.Equal(t, expected[uint32](14), numGroups[uint32](14))
+	assert.Equal(t, expected[uint32](15), numGroups[uint32](15))
+	assert.Equal(t, expected[uint32](28), numGroups[uint32](28))
+	assert.Equal(t, expected[uint32](29), numGroups[uint32](29))
+	assert.Equal(t, expected[uint32](56), numGroups[uint32](56))
+	assert.Equal(t, expected[uint32](57), numGroups[uint32](57))
 }
 
-func expected(x int) (groups uint32) {
-	groups = uint32(math.Ceil(float64(x) / float64(maxAvgGroupLoad)))
+func expected[S Size](x int) (groups S) {
+	groups = S(math.Ceil(float64(x) / float64(maxAvgGroupLoad)))
 	if groups == 0 {
 		groups = 1
 	}
