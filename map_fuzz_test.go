@@ -93,7 +93,7 @@ type hasher struct {
 	seed uintptr
 }
 
-func setConstSeed[K comparable, V any](m *Map[K, V], seed uintptr) {
+func setConstSeed[K comparable, V any, S Size](m *Map[K, V, S], seed uintptr) {
 	h := (*hasher)((unsafe.Pointer)(&m.hash))
 	h.seed = seed
 }
